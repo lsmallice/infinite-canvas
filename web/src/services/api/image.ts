@@ -235,6 +235,7 @@ function aiApiUrl(config: AiConfig, path: string) {
 function aiHeaders(config: AiConfig, contentType?: string) {
     return {
         Authorization: `Bearer ${config.apiKey}`,
+        ...(config.sub2apiKeyId ? { "X-Canvas-API-Key-ID": config.sub2apiKeyId } : {}),
         ...(contentType ? { "Content-Type": contentType } : {}),
     };
 }
@@ -719,7 +720,7 @@ export async function requestToolResponse(config: AiConfig, messages: ResponseIn
     }
 }
 
-export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat">) {
+export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat" | "sub2apiKeyId">) {
     try {
         if (config.apiFormat === "gemini") {
             const response = await axios.get<GeminiPayload>(geminiApiUrl({ ...defaultGeminiConfig, ...config }), { headers: geminiHeaders({ ...defaultGeminiConfig, ...config }) });
@@ -732,6 +733,7 @@ export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKe
         const response = await axios.get<{ data?: Array<{ id?: string }>; error?: { message?: string } }>(buildApiUrl(config.baseUrl, "/models"), {
             headers: {
                 Authorization: `Bearer ${config.apiKey}`,
+                ...(config.sub2apiKeyId ? { "X-Canvas-API-Key-ID": config.sub2apiKeyId } : {}),
             },
         });
         return (response.data.data || [])
@@ -744,7 +746,7 @@ export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKe
 }
 
 export async function fetchChannelModels(channel: ModelChannel) {
-    return fetchImageModels({ baseUrl: channel.baseUrl, apiKey: channel.apiKey, apiFormat: channel.apiFormat });
+    return fetchImageModels({ baseUrl: channel.baseUrl, apiKey: channel.apiKey, apiFormat: channel.apiFormat, sub2apiKeyId: channel.sub2apiKeyId || "" });
 }
 
 const defaultGeminiConfig: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat" | "model" | "systemPrompt"> = {

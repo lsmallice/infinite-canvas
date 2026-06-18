@@ -1,15 +1,15 @@
 "use client";
 
 import { App, Button, Form, Input, Modal, Progress, Segmented, Select, Tabs } from "antd";
-import { CircleAlert, Cloud, Plus, RefreshCw, Trash2, Wifi } from "lucide-react";
-import { useState } from "react";
+import { CircleUserRound, Cloud, RefreshCw, Wifi } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { ModelPicker } from "@/components/model-picker";
 import { fetchChannelModels } from "@/services/api/image";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
-import { createModelChannel, defaultBaseUrlForApiFormat, filterModelsByCapability, modelOptionLabel, modelOptionsFromChannels, normalizeModelOptionValue, useConfigStore, type AiConfig, type ApiCallFormat, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { filterModelsByCapability, modelOptionLabel, modelOptionsFromChannels, normalizeModelOptionValue, useConfigStore, type AiConfig, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -27,16 +27,28 @@ type WebdavDomainProgress = {
     status?: "active" | "success" | "exception";
 };
 
+type CanvasImageKeyOption = {
+    id: number;
+    name: string;
+    masked_key: string;
+    group_name?: string;
+    expires_at?: string;
+    quota: number;
+    quota_used: number;
+    image_eligible: boolean;
+};
+
+type Sub2APISessionUser = {
+    email?: string;
+    username?: string;
+    role?: string;
+};
+
 const modelGroups: ModelGroup[] = [
     { capability: "image", modelKey: "imageModel", modelsKey: "imageModels", defaultLabel: "默认生图模型", optionsLabel: "生图模型可选项" },
     { capability: "video", modelKey: "videoModel", modelsKey: "videoModels", defaultLabel: "默认视频模型", optionsLabel: "视频模型可选项" },
     { capability: "text", modelKey: "textModel", modelsKey: "textModels", defaultLabel: "默认文本模型", optionsLabel: "文本模型可选项" },
     { capability: "audio", modelKey: "audioModel", modelsKey: "audioModels", defaultLabel: "默认音频模型", optionsLabel: "音频模型可选项" },
-];
-
-const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
-    { label: "OpenAI", value: "openai" },
-    { label: "Gemini", value: "gemini" },
 ];
 
 const webdavDomainKeys: AppSyncDomainKey[] = ["canvas", "assets", "image-workbench", "video-workbench"];
@@ -63,6 +75,10 @@ export function AppConfigModal() {
     const [loadingChannelId, setLoadingChannelId] = useState("");
     const [testingWebdav, setTestingWebdav] = useState(false);
     const [syncingWebdav, setSyncingWebdav] = useState(false);
+    const [loadingImageKeys, setLoadingImageKeys] = useState(false);
+    const [imageKeys, setImageKeys] = useState<CanvasImageKeyOption[]>([]);
+    const [sub2apiUser, setSub2apiUser] = useState<Sub2APISessionUser | null>(null);
+    const [siteName, setSiteName] = useState("小冰站");
     const [webdavSyncStatus, setWebdavSyncStatus] = useState("");
     const [webdavDomainProgress, setWebdavDomainProgress] = useState(createWebdavDomainProgress);
     const config = useConfigStore((state) => state.config);
@@ -76,12 +92,18 @@ export function AppConfigModal() {
     const modelOptions = config.models.map((model) => ({ label: modelOptionLabel(config, model), value: model }));
     const webdavReady = Boolean(webdav.url.trim());
 
+    useEffect(() => {
+        if (!isConfigOpen) return;
+        void loadSub2APISession();
+        void loadImageKeys();
+    }, [isConfigOpen]);
+
     const saveConfig = (nextConfig: AiConfig) => {
         (Object.keys(nextConfig) as Array<keyof AiConfig>).forEach((key) => updateConfig(key, nextConfig[key]));
     };
 
     const finishConfig = () => {
-        const ready = config.channels.some((channel) => channel.baseUrl.trim() && channel.apiKey.trim() && channel.models.length);
+        const ready = config.channels.some((channel) => channel.baseUrl.trim() && channel.apiKey.trim() && (channel.sub2apiKeyId || config.sub2apiKeyId) && channel.models.length);
         setConfigDialogOpen(false);
         if (!ready) return;
         message.success(shouldPromptContinue ? "配置已保存，请继续刚才的请求" : "配置已保存");
@@ -97,26 +119,9 @@ export function AppConfigModal() {
         updateChannels(config.channels.map((channel) => (channel.id === id ? { ...channel, ...patch, models: patch.models ? uniqueModels(patch.models) : channel.models } : channel)));
     };
 
-    const updateChannelApiFormat = (channel: ModelChannel, apiFormat: ApiCallFormat) => {
-        const baseUrl = !channel.baseUrl.trim() || channel.baseUrl.trim() === defaultBaseUrlForApiFormat(channel.apiFormat) ? defaultBaseUrlForApiFormat(apiFormat) : channel.baseUrl;
-        updateChannel(channel.id, { apiFormat, baseUrl });
-    };
-
-    const addChannel = () => {
-        updateChannels([...config.channels, createModelChannel({ name: `渠道 ${config.channels.length + 1}` })]);
-    };
-
-    const deleteChannel = (id: string) => {
-        if (config.channels.length <= 1) {
-            message.warning("至少保留一个渠道");
-            return;
-        }
-        updateChannels(config.channels.filter((channel) => channel.id !== id));
-    };
-
     const refreshChannelModels = async (channel: ModelChannel) => {
-        if (!channel.baseUrl.trim() || !channel.apiKey.trim()) {
-            message.error("请先填写该渠道的 Base URL 和 API Key");
+        if (!(channel.sub2apiKeyId || config.sub2apiKeyId)) {
+            message.error("请先选择可用于生图的 API Key");
             return;
         }
         setLoadingChannelId(channel.id);
@@ -132,9 +137,9 @@ export function AppConfigModal() {
     };
 
     const refreshAllModels = async () => {
-        const runnable = config.channels.filter((channel) => channel.baseUrl.trim() && channel.apiKey.trim());
+        const runnable = config.channels.filter((channel) => channel.baseUrl.trim() && channel.apiKey.trim() && (channel.sub2apiKeyId || config.sub2apiKeyId));
         if (!runnable.length) {
-            message.error("请先填写至少一个渠道的 Base URL 和 API Key");
+            message.error("请先选择可用于生图的 API Key");
             return;
         }
         setLoadingChannelId("all");
@@ -148,6 +153,42 @@ export function AppConfigModal() {
         } finally {
             setLoadingChannelId("");
         }
+    };
+
+    const loadImageKeys = async () => {
+        setLoadingImageKeys(true);
+        try {
+            const response = await fetch("/api/sub2api/image-keys", { cache: "no-store" });
+            if (!response.ok) throw new Error(response.status === 401 ? "请先从 Sub2API 打开无限画布" : "读取 API Key 失败");
+            const payload = (await response.json()) as { items?: CanvasImageKeyOption[] };
+            const items = payload.items || [];
+            setImageKeys(items);
+            if (!config.sub2apiKeyId && items[0]) {
+                selectImageKey(String(items[0].id));
+            }
+        } catch (error) {
+            setImageKeys([]);
+            message.warning(error instanceof Error ? error.message : "读取 API Key 失败");
+        } finally {
+            setLoadingImageKeys(false);
+        }
+    };
+
+    const loadSub2APISession = async () => {
+        try {
+            const response = await fetch("/api/sub2api/session", { cache: "no-store" });
+            if (!response.ok) throw new Error("读取登录状态失败");
+            const payload = (await response.json()) as { authenticated?: boolean; user?: Sub2APISessionUser | null; site_name?: string };
+            setSub2apiUser(payload.authenticated ? payload.user || null : null);
+            if (payload.site_name?.trim()) setSiteName(payload.site_name.trim());
+        } catch {
+            setSub2apiUser(null);
+        }
+    };
+
+    const selectImageKey = (keyId: string) => {
+        updateConfig("sub2apiKeyId", keyId);
+        updateChannels(config.channels.map((channel, index) => (index === 0 ? { ...channel, sub2apiKeyId: keyId } : channel)));
     };
 
     const updateCapabilityModels = (group: ModelGroup, models: string[]) => {
@@ -237,10 +278,10 @@ export function AppConfigModal() {
                             <Form layout="vertical" requiredMark={false}>
                                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                                     <div className="min-w-0 flex-1">
-                                        <div className="flex w-fit max-w-full flex-wrap items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-100">
-                                            <CircleAlert className="size-3.5 shrink-0" />
-                                            <span className="font-semibold">重要：</span>
-                                            <span>新增或拉取模型后，需要到“模型”Tab 选择可选项才会显示。</span>
+                                        <div className="flex w-fit max-w-full flex-wrap items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-900 dark:border-emerald-700/60 dark:bg-emerald-950/30 dark:text-emerald-100">
+                                            <CircleUserRound className="size-3.5 shrink-0" />
+                                            <span className="font-semibold">{siteName}</span>
+                                            <span>{sub2apiUser ? `已登录：${sub2apiDisplayName(sub2apiUser)}` : `请从${siteName}打开无限画布`}</span>
                                             <Button type="link" size="small" className="h-auto p-0 text-xs font-semibold text-amber-900 dark:text-amber-100" onClick={() => setActiveTab("models")}>
                                                 去模型设置
                                             </Button>
@@ -250,42 +291,45 @@ export function AppConfigModal() {
                                         <Button icon={<RefreshCw className="size-4" />} loading={Boolean(loadingChannelId)} onClick={() => void refreshAllModels()}>
                                             拉取全部
                                         </Button>
-                                        <Button type="primary" icon={<Plus className="size-4" />} onClick={addChannel}>
-                                            新增渠道
+                                        <Button loading={loadingImageKeys} onClick={() => void loadImageKeys()}>
+                                            刷新 Key
                                         </Button>
                                     </div>
                                 </div>
                                 <div className="space-y-3">
-                                    {config.channels.map((channel) => (
+                                    <section className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+                                        <Form.Item label="API Key" extra="只显示当前账号下可用于生图的 Key。" className="mb-0">
+                                            <Select
+                                                showSearch
+                                                loading={loadingImageKeys}
+                                                placeholder="选择可用于生图的 API Key"
+                                                value={config.sub2apiKeyId || undefined}
+                                                options={imageKeys.map((item) => ({
+                                                    value: String(item.id),
+                                                    label: `${item.name} · ${item.masked_key}${item.group_name ? ` · ${item.group_name}` : ""}`,
+                                                }))}
+                                                onChange={selectImageKey}
+                                                notFoundContent={loadingImageKeys ? "读取中..." : "暂无可用于生图的 Key"}
+                                            />
+                                        </Form.Item>
+                                    </section>
+                                    {config.channels.slice(0, 1).map((channel) => (
                                         <section key={channel.id} className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                                             <div className="mb-3 flex items-center justify-between gap-3">
                                                 <div className="min-w-0">
-                                                    <div className="truncate text-sm font-semibold">{channel.name || "未命名渠道"}</div>
+                                                    <div className="truncate text-sm font-semibold">{siteName}</div>
                                                     <div className="mt-1 text-xs text-stone-500">
-                                                        {apiFormatLabel(channel.apiFormat)} · 已保存 {channel.models.length} 个模型
+                                                        已保存 {channel.models.length} 个模型
                                                     </div>
                                                 </div>
                                                 <div className="flex shrink-0 gap-2">
                                                     <Button size="small" loading={loadingChannelId === channel.id} onClick={() => void refreshChannelModels(channel)}>
                                                         拉取模型
                                                     </Button>
-                                                    <Button size="small" danger icon={<Trash2 className="size-3.5" />} onClick={() => deleteChannel(channel.id)} />
                                                 </div>
                                             </div>
-                                            <div className="grid gap-4 md:grid-cols-2">
-                                                <Form.Item label="渠道名称" className="mb-0">
-                                                    <Input value={channel.name} onChange={(event) => updateChannel(channel.id, { name: event.target.value })} />
-                                                </Form.Item>
-                                                <Form.Item label="调用格式" className="mb-0">
-                                                    <Select value={channel.apiFormat} options={apiFormatOptions} onChange={(value: ApiCallFormat) => updateChannelApiFormat(channel, value)} />
-                                                </Form.Item>
-                                                <Form.Item label="Base URL" className="mb-0">
-                                                    <Input value={channel.baseUrl} onChange={(event) => updateChannel(channel.id, { baseUrl: event.target.value })} />
-                                                </Form.Item>
-                                                <Form.Item label="API Key" className="mb-0">
-                                                    <Input.Password value={channel.apiKey} onChange={(event) => updateChannel(channel.id, { apiKey: event.target.value })} />
-                                                </Form.Item>
-                                                <Form.Item label="模型列表" className="mb-0 md:col-span-2">
+                                            <div className="grid gap-4">
+                                                <Form.Item label="模型列表" className="mb-0">
                                                     <Select mode="tags" showSearch allowClear maxTagCount="responsive" placeholder="输入模型名，或点击拉取模型" value={channel.models} onChange={(models) => updateChannel(channel.id, { models })} />
                                                 </Form.Item>
                                             </div>
@@ -446,6 +490,7 @@ function withChannels(config: AiConfig, channels: ModelChannel[]): AiConfig {
         models,
         baseUrl: channels[0]?.baseUrl || config.baseUrl,
         apiKey: channels[0]?.apiKey || config.apiKey,
+        sub2apiKeyId: channels[0]?.sub2apiKeyId || config.sub2apiKeyId,
         apiFormat: channels[0]?.apiFormat || config.apiFormat,
         imageModels,
         videoModels,
@@ -477,12 +522,12 @@ function uniqueModels(models: string[]) {
     return Array.from(new Set(models.map((model) => model.trim()).filter(Boolean)));
 }
 
-function apiFormatLabel(apiFormat: ApiCallFormat) {
-    return apiFormat === "gemini" ? "Gemini" : "OpenAI";
-}
-
 function formatWebdavTime(value: string) {
     return new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function sub2apiDisplayName(user: Sub2APISessionUser) {
+    return user.email?.trim() || user.username?.trim() || "当前账号";
 }
 
 function WebdavProgressGrid({ progress }: { progress: Record<AppSyncDomainKey, WebdavDomainProgress> }) {

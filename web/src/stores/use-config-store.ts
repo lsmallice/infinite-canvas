@@ -12,6 +12,7 @@ export type ModelChannel = {
     name: string;
     baseUrl: string;
     apiKey: string;
+    sub2apiKeyId?: string;
     apiFormat: ApiCallFormat;
     models: string[];
 };
@@ -20,6 +21,7 @@ export type AiConfig = {
     channelMode: "remote" | "local";
     baseUrl: string;
     apiKey: string;
+    sub2apiKeyId: string;
     apiFormat: ApiCallFormat;
     channels: ModelChannel[];
     model: string;
@@ -61,27 +63,31 @@ export type ModelCapability = "image" | "video" | "text" | "audio";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
+const SUB2API_PROXY_BASE_URL = "/api/sub2api";
+const SUB2API_PROXY_API_KEY = "sub2api-session";
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
-    baseUrl: OPENAI_BASE_URL,
-    apiKey: "",
+    baseUrl: SUB2API_PROXY_BASE_URL,
+    apiKey: SUB2API_PROXY_API_KEY,
+    sub2apiKeyId: "",
     apiFormat: "openai",
     channels: [
         {
-            id: "default",
-            name: "默认渠道",
-            baseUrl: OPENAI_BASE_URL,
-            apiKey: "",
+            id: "sub2api",
+            name: "Sub2API",
+            baseUrl: SUB2API_PROXY_BASE_URL,
+            apiKey: SUB2API_PROXY_API_KEY,
+            sub2apiKeyId: "",
             apiFormat: "openai",
-            models: ["gpt-image-2", "grok-imagine-video", "gpt-5.5", "gpt-4o-mini-tts"],
+            models: ["gpt-image-2", "gpt-5.5"],
         },
     ],
-    model: "default::gpt-image-2",
-    imageModel: "default::gpt-image-2",
-    videoModel: "default::grok-imagine-video",
-    textModel: "default::gpt-5.5",
-    audioModel: "default::gpt-4o-mini-tts",
+    model: "sub2api::gpt-image-2",
+    imageModel: "sub2api::gpt-image-2",
+    videoModel: "",
+    textModel: "sub2api::gpt-5.5",
+    audioModel: "",
     audioVoice: "alloy",
     audioFormat: "mp3",
     audioSpeed: "1",
@@ -91,11 +97,11 @@ export const defaultConfig: AiConfig = {
     videoGenerateAudio: "true",
     videoWatermark: "false",
     systemPrompt: "",
-    models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
-    imageModels: ["default::gpt-image-2"],
-    videoModels: ["default::grok-imagine-video"],
-    textModels: ["default::gpt-5.5"],
-    audioModels: ["default::gpt-4o-mini-tts"],
+    models: ["sub2api::gpt-image-2", "sub2api::gpt-5.5"],
+    imageModels: ["sub2api::gpt-image-2"],
+    videoModels: [],
+    textModels: ["sub2api::gpt-5.5"],
+    audioModels: [],
     quality: "auto",
     size: "1:1",
     count: "1",
@@ -166,7 +172,7 @@ function modelListKey(capability: ModelCapability) {
 
 function isAiConfigReady(config: AiConfig, model: string) {
     const channel = resolveModelChannel(config, model);
-    return Boolean(model.trim() && channel.baseUrl.trim() && channel.apiKey.trim());
+    return Boolean(model.trim() && channel.baseUrl.trim() && channel.apiKey.trim() && (channel.sub2apiKeyId || config.sub2apiKeyId));
 }
 
 export const useConfigStore = create<ConfigStore>()(
@@ -214,6 +220,7 @@ export const useConfigStore = create<ConfigStore>()(
                         channelMode: "local",
                         apiFormat: normalizeApiFormat(config.apiFormat),
                         channels,
+                        sub2apiKeyId: config.sub2apiKeyId || channels[0]?.sub2apiKeyId || "",
                         models,
                         imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
                         videoModel: normalizeModelOptionValue(config.videoModel || "grok-imagine-video", channels),
@@ -258,6 +265,7 @@ export function createModelChannel(channel?: Partial<ModelChannel>): ModelChanne
         name: channel?.name?.trim() || "新渠道",
         baseUrl: channel?.baseUrl?.trim() || defaultBaseUrlForApiFormat(apiFormat),
         apiKey: channel?.apiKey || "",
+        sub2apiKeyId: channel?.sub2apiKeyId || "",
         apiFormat,
         models: uniqueRawModels(channel?.models || []),
     };
@@ -300,8 +308,8 @@ export function normalizeModelOptionValue(value: string | undefined, channels: M
         const channel = channels.find((item) => item.id === decoded.channelId);
         return channel && channel.models.includes(decoded.model) ? model : "";
     }
-    const channel = channels.find((item) => item.models.includes(decoded?.model || model)) || channels[0];
-    return channel && channel.models.includes(decoded?.model || model) ? encodeChannelModel(channel.id, decoded?.model || model) : model;
+    const channel = channels.find((item) => item.models.includes(model)) || channels[0];
+    return channel && channel.models.includes(model) ? encodeChannelModel(channel.id, model) : model;
 }
 
 export function resolveModelChannel(config: AiConfig, value: string) {
@@ -318,6 +326,7 @@ export function resolveModelRequestConfig(config: AiConfig, value: string) {
         model: modelOptionName(value || config.model),
         baseUrl: channel.baseUrl,
         apiKey: channel.apiKey,
+        sub2apiKeyId: channel.sub2apiKeyId || config.sub2apiKeyId,
         apiFormat: channel.apiFormat,
     };
 }
@@ -335,10 +344,11 @@ function normalizeChannels(config: AiConfig) {
     if (!channels.length) {
         channels.push(
             createModelChannel({
-                id: "default",
-                name: "默认渠道",
+                id: "sub2api",
+                name: "Sub2API",
                 baseUrl: config.baseUrl || defaultConfig.baseUrl,
-                apiKey: config.apiKey || "",
+                apiKey: config.apiKey || defaultConfig.apiKey,
+                sub2apiKeyId: config.sub2apiKeyId || "",
                 apiFormat: config.apiFormat || defaultConfig.apiFormat,
                 models: uniqueRawModels([
                     ...(config.models || []),
@@ -351,7 +361,16 @@ function normalizeChannels(config: AiConfig) {
             }),
         );
     }
-    return channels.map((channel) => ({ ...channel, models: uniqueRawModels(channel.models) }));
+    return channels.map((channel, index) => ({
+        ...channel,
+        id: index === 0 ? "sub2api" : channel.id,
+        name: index === 0 ? "Sub2API" : channel.name,
+        baseUrl: SUB2API_PROXY_BASE_URL,
+        apiKey: SUB2API_PROXY_API_KEY,
+        apiFormat: "openai" as const,
+        sub2apiKeyId: channel.sub2apiKeyId || config.sub2apiKeyId || "",
+        models: uniqueRawModels(channel.models),
+    }));
 }
 
 export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {
