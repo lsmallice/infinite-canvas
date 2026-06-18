@@ -41,6 +41,7 @@ type CanvasImageKeyOption = {
 type Sub2APISessionUser = {
     email?: string;
     username?: string;
+    avatarUrl?: string;
     role?: string;
 };
 
@@ -78,7 +79,6 @@ export function AppConfigModal() {
     const [loadingImageKeys, setLoadingImageKeys] = useState(false);
     const [imageKeys, setImageKeys] = useState<CanvasImageKeyOption[]>([]);
     const [sub2apiUser, setSub2apiUser] = useState<Sub2APISessionUser | null>(null);
-    const [siteName, setSiteName] = useState("小冰站");
     const [webdavSyncStatus, setWebdavSyncStatus] = useState("");
     const [webdavDomainProgress, setWebdavDomainProgress] = useState(createWebdavDomainProgress);
     const config = useConfigStore((state) => state.config);
@@ -159,7 +159,7 @@ export function AppConfigModal() {
         setLoadingImageKeys(true);
         try {
             const response = await fetch("/api/sub2api/image-keys", { cache: "no-store" });
-            if (!response.ok) throw new Error(response.status === 401 ? "请先从 Sub2API 打开无限画布" : "读取 API Key 失败");
+            if (!response.ok) throw new Error(response.status === 401 ? "请先登录后打开无限画布" : "读取 API Key 失败");
             const payload = (await response.json()) as { items?: CanvasImageKeyOption[] };
             const items = payload.items || [];
             setImageKeys(items);
@@ -178,9 +178,8 @@ export function AppConfigModal() {
         try {
             const response = await fetch("/api/sub2api/session", { cache: "no-store" });
             if (!response.ok) throw new Error("读取登录状态失败");
-            const payload = (await response.json()) as { authenticated?: boolean; user?: Sub2APISessionUser | null; site_name?: string };
+            const payload = (await response.json()) as { authenticated?: boolean; user?: Sub2APISessionUser | null };
             setSub2apiUser(payload.authenticated ? payload.user || null : null);
-            if (payload.site_name?.trim()) setSiteName(payload.site_name.trim());
         } catch {
             setSub2apiUser(null);
         }
@@ -278,13 +277,9 @@ export function AppConfigModal() {
                             <Form layout="vertical" requiredMark={false}>
                                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                                     <div className="min-w-0 flex-1">
-                                        <div className="flex w-fit max-w-full flex-wrap items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-900 dark:border-emerald-700/60 dark:bg-emerald-950/30 dark:text-emerald-100">
-                                            <CircleUserRound className="size-3.5 shrink-0" />
-                                            <span className="font-semibold">{siteName}</span>
-                                            <span>{sub2apiUser ? `已登录：${sub2apiDisplayName(sub2apiUser)}` : `请从${siteName}打开无限画布`}</span>
-                                            <Button type="link" size="small" className="h-auto p-0 text-xs font-semibold text-amber-900 dark:text-amber-100" onClick={() => setActiveTab("models")}>
-                                                去模型设置
-                                            </Button>
+                                        <div className="flex w-fit max-w-full items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-900 dark:border-emerald-700/60 dark:bg-emerald-950/30 dark:text-emerald-100">
+                                            <AccountAvatar user={sub2apiUser} />
+                                            <span className="min-w-0 truncate font-semibold">{sub2apiUser ? sub2apiDisplayName(sub2apiUser) : "未登录"}</span>
                                         </div>
                                     </div>
                                     <div className="flex shrink-0 gap-2">
@@ -306,7 +301,7 @@ export function AppConfigModal() {
                                                 value={config.sub2apiKeyId || undefined}
                                                 options={imageKeys.map((item) => ({
                                                     value: String(item.id),
-                                                    label: `${item.name} · ${item.masked_key}${item.group_name ? ` · ${item.group_name}` : ""}`,
+                                                    label: `${item.name}${item.group_name ? ` · ${item.group_name}` : ""}`,
                                                 }))}
                                                 onChange={selectImageKey}
                                                 notFoundContent={loadingImageKeys ? "读取中..." : "暂无可用于生图的 Key"}
@@ -317,7 +312,7 @@ export function AppConfigModal() {
                                         <section key={channel.id} className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                                             <div className="mb-3 flex items-center justify-between gap-3">
                                                 <div className="min-w-0">
-                                                    <div className="truncate text-sm font-semibold">{siteName}</div>
+                                                    <div className="truncate text-sm font-semibold">可用模型</div>
                                                     <div className="mt-1 text-xs text-stone-500">
                                                         已保存 {channel.models.length} 个模型
                                                     </div>
@@ -527,7 +522,17 @@ function formatWebdavTime(value: string) {
 }
 
 function sub2apiDisplayName(user: Sub2APISessionUser) {
-    return user.email?.trim() || user.username?.trim() || "当前账号";
+    return user.username?.trim() || user.email?.trim() || "当前账号";
+}
+
+function AccountAvatar({ user }: { user: Sub2APISessionUser | null }) {
+    const avatarUrl = user?.avatarUrl?.trim();
+    if (avatarUrl) return <img src={avatarUrl} alt="" className="size-5 shrink-0 rounded-full object-cover" referrerPolicy="no-referrer" />;
+    return (
+        <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-white/80 text-[10px] font-semibold text-emerald-800 shadow-sm dark:bg-emerald-900/60 dark:text-emerald-100">
+            {user ? sub2apiDisplayName(user).slice(0, 1).toUpperCase() : <CircleUserRound className="size-3.5" />}
+        </span>
+    );
 }
 
 function WebdavProgressGrid({ progress }: { progress: Record<AppSyncDomainKey, WebdavDomainProgress> }) {

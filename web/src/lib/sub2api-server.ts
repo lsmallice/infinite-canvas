@@ -8,6 +8,7 @@ export type Sub2APISession = {
     userId: number;
     email?: string;
     username?: string;
+    avatarUrl?: string;
     role?: string;
     issuedAt: number;
 };

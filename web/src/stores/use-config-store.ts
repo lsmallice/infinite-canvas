@@ -293,7 +293,11 @@ export function modelOptionLabel(config: AiConfig, value: string) {
     const decoded = decodeChannelModel(value);
     if (!decoded) return value;
     const channel = config.channels.find((item) => item.id === decoded.channelId);
-    return channel ? `${decoded.model}（${channel.name}）` : decoded.model;
+    return channel && shouldShowModelChannelLabel(config, channel) ? `${decoded.model}（${channel.name}）` : decoded.model;
+}
+
+export function shouldShowModelChannelLabel(config: AiConfig, channel: ModelChannel) {
+    return config.channels.length > 1 && channel.name.trim().toLowerCase() !== "sub2api";
 }
 
 export function modelOptionsFromChannels(channels: ModelChannel[]) {

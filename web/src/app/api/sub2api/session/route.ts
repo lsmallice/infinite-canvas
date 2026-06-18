@@ -4,7 +4,8 @@ import { clearSub2APISession, readSub2APISession } from "@/lib/sub2api-server";
 
 export async function GET() {
     const session = await readSub2APISession();
-    return NextResponse.json({ authenticated: Boolean(session), user: session, site_name: process.env.CANVAS_SITE_NAME || "小冰站" });
+    const mainSiteURL = process.env.SUB2API_WEB_BASE_URL || process.env.SUB2API_PUBLIC_BASE_URL || "";
+    return NextResponse.json({ authenticated: Boolean(session), user: session, main_site_url: mainSiteURL });
 }
 
 export async function DELETE() {

@@ -7,6 +7,7 @@ type ExchangeResponse = {
         id: number;
         email?: string;
         username?: string;
+        avatar_url?: string;
         role?: string;
     };
 };
@@ -26,11 +27,12 @@ export async function GET(request: NextRequest) {
             userId: data.user.id,
             email: data.user.email,
             username: data.user.username,
+            avatarUrl: data.user.avatar_url,
             role: data.user.role,
             issuedAt: Date.now(),
         };
         await setSub2APISession(session);
-        return NextResponse.redirect(redirectURL("/", request));
+        return NextResponse.redirect(redirectURL(`/${themeQuery(request)}`, request));
     } catch (error) {
         const url = redirectURL("/", request);
         url.searchParams.set("auth_error", error instanceof Error ? error.message : "sso_failed");
@@ -40,4 +42,9 @@ export async function GET(request: NextRequest) {
 
 function redirectURL(path: string, request: NextRequest) {
     return canvasURL(path) || new URL(path, request.url);
+}
+
+function themeQuery(request: NextRequest) {
+    const theme = request.nextUrl.searchParams.get("theme");
+    return theme === "light" || theme === "dark" ? `?theme=${theme}` : "";
 }
