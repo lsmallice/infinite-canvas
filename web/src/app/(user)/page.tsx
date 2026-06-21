@@ -1,13 +1,15 @@
 "use client";
 
 import { ArrowRight } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { Suspense, type ReactNode, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { App, Button, Image, Tag } from "antd";
 
 import { Sub2APIThemeHandoff } from "@/components/layout/sub2api-theme-handoff";
 import { fetchPrompts, type Prompt } from "@/services/api/prompts";
 import { navigationTools } from "@/constant/navigation-tools";
 import { cn } from "@/lib/utils";
+import { useSub2APIAuthGuard } from "@/hooks/use-sub2api-auth-guard";
 
 function Highlighter({ action, color, children }: { action: "highlight" | "underline"; color: string; children: ReactNode }) {
     return (
@@ -24,6 +26,7 @@ function Highlighter({ action, color, children }: { action: "highlight" | "under
 
 export default function IndexPage() {
     const { message } = App.useApp();
+    const { guardProtectedNavigation } = useSub2APIAuthGuard();
     const [primaryTool] = navigationTools;
     const [promptShowcase, setPromptShowcase] = useState<Prompt[]>([]);
     const [previewIndex, setPreviewIndex] = useState(0);
@@ -37,6 +40,9 @@ export default function IndexPage() {
 
     return (
         <main className="relative h-full overflow-y-auto bg-background bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] text-stone-950 dark:bg-[radial-gradient(rgba(245,245,244,.18)_1px,transparent_1px)] dark:text-stone-100">
+            <Suspense fallback={null}>
+                <LoginRequiredNotice />
+            </Suspense>
             <Sub2APIThemeHandoff />
             <section className="relative mx-auto min-h-[calc(100vh-4rem)] max-w-7xl overflow-hidden px-6">
                 <div className="pointer-events-none absolute left-[15%] top-24 size-20 rounded-full border border-dashed border-stone-200 dark:border-stone-800" />
@@ -56,10 +62,10 @@ export default function IndexPage() {
                         ，让创作从单次生成变成连续推演。
                     </p>
                     <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
-                        <Button type="primary" size="large" href={`/${primaryTool.slug}`} icon={<ArrowRight className="size-4" />} iconPlacement="end">
+                        <Button type="primary" size="large" href={`/${primaryTool.slug}`} icon={<ArrowRight className="size-4" />} iconPlacement="end" onClick={(event) => guardProtectedNavigation(event, `/${primaryTool.slug}`, primaryTool.label)}>
                             开始使用
                         </Button>
-                        <Button size="large" href="/canvas">
+                        <Button size="large" href="/canvas" onClick={(event) => guardProtectedNavigation(event, "/canvas", "画布")}>
                             打开画布
                         </Button>
                     </div>
@@ -124,4 +130,18 @@ export default function IndexPage() {
             </Image.PreviewGroup>
         </main>
     );
+}
+
+function LoginRequiredNotice() {
+    const router = useRouter();
+    const searchParams = useSearchParams();
+    const { showLoginRequired } = useSub2APIAuthGuard();
+
+    useEffect(() => {
+        if (searchParams.get("auth_error") !== "login_required") return;
+        showLoginRequired("画布");
+        router.replace("/");
+    }, [router, searchParams, showLoginRequired]);
+
+    return null;
 }

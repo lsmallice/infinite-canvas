@@ -1,5 +1,6 @@
 "use client";
 
+import type { MouseEvent } from "react";
 import { Drawer } from "antd";
 import Link from "next/link";
 
@@ -9,10 +10,11 @@ import { cn } from "@/lib/utils";
 type MobileNavDrawerProps = {
     open: boolean;
     activeToolSlug?: NavigationToolSlug;
+    onNavigate: (event: MouseEvent<HTMLElement>, path: string, featureName?: string) => void;
     onClose: () => void;
 };
 
-export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDrawerProps) {
+export function MobileNavDrawer({ open, activeToolSlug, onNavigate, onClose }: MobileNavDrawerProps) {
     return (
         <Drawer title="导航" placement="left" size={280} open={open} onClose={onClose} className="md:hidden">
             <div className="space-y-1">
@@ -23,7 +25,10 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
                         <Link
                             key={tool.slug}
                             href={`/${tool.slug}`}
-                            onClick={onClose}
+                            onClick={(event) => {
+                                onNavigate(event, `/${tool.slug}`, tool.label);
+                                if (!event.defaultPrevented) onClose();
+                            }}
                             className={cn(
                                 "flex items-center gap-3 rounded-lg px-3 py-3 text-base transition",
                                 active ? "bg-stone-100 font-medium text-stone-950 dark:bg-stone-800 dark:text-stone-100" : "text-stone-600 hover:bg-stone-100 hover:text-stone-950 dark:text-stone-300 dark:hover:bg-stone-800 dark:hover:text-stone-100",

@@ -97,7 +97,10 @@ function verifySession(raw: string): Sub2APISession | null {
     if (!safeEqual(signature, hmac(`${payload}.${nonce}`))) return null;
     try {
         const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Sub2APISession;
-        return typeof parsed.userId === "number" && parsed.userId > 0 ? parsed : null;
+        if (typeof parsed.userId !== "number" || parsed.userId <= 0) return null;
+        if (typeof parsed.issuedAt !== "number" || parsed.issuedAt <= 0) return null;
+        if (Date.now() - parsed.issuedAt > DEFAULT_SESSION_MAX_AGE_SECONDS * 1000) return null;
+        return parsed;
     } catch {
         return null;
     }

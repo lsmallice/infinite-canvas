@@ -10,6 +10,7 @@ import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent }
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
 import { filterModelsByCapability, modelOptionLabel, modelOptionsFromChannels, normalizeModelOptionValue, useConfigStore, type AiConfig, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { useSub2APIAuthGuard } from "@/hooks/use-sub2api-auth-guard";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -89,13 +90,16 @@ export function AppConfigModal() {
     const shouldPromptContinue = useConfigStore((state) => state.shouldPromptContinue);
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
     const clearPromptContinue = useConfigStore((state) => state.clearPromptContinue);
+    const { goToLogin, showLoginRequired } = useSub2APIAuthGuard();
     const modelOptions = config.models.map((model) => ({ label: modelOptionLabel(config, model), value: model }));
     const webdavReady = Boolean(webdav.url.trim());
+    const requireSub2APILogin = () => {
+        showLoginRequired("渠道配置");
+    };
 
     useEffect(() => {
         if (!isConfigOpen) return;
         void loadSub2APISession();
-        void loadImageKeys();
     }, [isConfigOpen]);
 
     const saveConfig = (nextConfig: AiConfig) => {
@@ -120,6 +124,10 @@ export function AppConfigModal() {
     };
 
     const refreshChannelModels = async (channel: ModelChannel) => {
+        if (!sub2apiUser) {
+            requireSub2APILogin();
+            return;
+        }
         if (!(channel.sub2apiKeyId || config.sub2apiKeyId)) {
             message.error("请先选择可用于生图的 API Key");
             return;
@@ -137,6 +145,10 @@ export function AppConfigModal() {
     };
 
     const refreshAllModels = async () => {
+        if (!sub2apiUser) {
+            requireSub2APILogin();
+            return;
+        }
         const runnable = config.channels.filter((channel) => channel.baseUrl.trim() && channel.apiKey.trim() && (channel.sub2apiKeyId || config.sub2apiKeyId));
         if (!runnable.length) {
             message.error("请先选择可用于生图的 API Key");
@@ -155,7 +167,12 @@ export function AppConfigModal() {
         }
     };
 
-    const loadImageKeys = async () => {
+    const loadImageKeys = async (promptLogin = true, authenticated = Boolean(sub2apiUser)) => {
+        if (!authenticated) {
+            if (promptLogin) requireSub2APILogin();
+            setImageKeys([]);
+            return;
+        }
         setLoadingImageKeys(true);
         try {
             const response = await fetch("/api/sub2api/image-keys", { cache: "no-store" });
@@ -180,6 +197,7 @@ export function AppConfigModal() {
             if (!response.ok) throw new Error("读取登录状态失败");
             const payload = (await response.json()) as { authenticated?: boolean; user?: Sub2APISessionUser | null };
             setSub2apiUser(payload.authenticated ? payload.user || null : null);
+            if (payload.authenticated) void loadImageKeys(false, true);
         } catch {
             setSub2apiUser(null);
         }
@@ -280,6 +298,11 @@ export function AppConfigModal() {
                                         <div className="flex w-fit max-w-full items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-900 dark:border-emerald-700/60 dark:bg-emerald-950/30 dark:text-emerald-100">
                                             <AccountAvatar user={sub2apiUser} />
                                             <span className="min-w-0 truncate font-semibold">{sub2apiUser ? sub2apiDisplayName(sub2apiUser) : "未登录"}</span>
+                                            {!sub2apiUser ? (
+                                                <Button size="small" type="link" className="h-auto px-1 py-0 text-xs" onClick={() => goToLogin()}>
+                                                    去登录
+                                                </Button>
+                                            ) : null}
                                         </div>
                                     </div>
                                     <div className="flex shrink-0 gap-2">
