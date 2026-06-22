@@ -52,6 +52,9 @@ async function proxySub2API(request: NextRequest, context: { params: Promise<{ p
             cache: "no-store",
         };
         const upstream = await fetch(upstreamURL, init);
+        if (request.method === "POST" && (path === "images/generations" || path === "images/edits")) {
+            return await normalizeImageResponse(upstream);
+        }
         return new NextResponse(upstream.body, {
             status: upstream.status,
             statusText: upstream.statusText,
@@ -68,4 +71,37 @@ function filterResponseHeaders(headers: Headers) {
     next.delete("content-length");
     next.delete("transfer-encoding");
     return next;
+}
+
+async function normalizeImageResponse(upstream: Response) {
+    const headers = filterResponseHeaders(upstream.headers);
+    const contentType = upstream.headers.get("content-type") || "";
+    if (!upstream.ok || !contentType.toLowerCase().includes("application/json")) {
+        return new NextResponse(upstream.body, {
+            status: upstream.status,
+            statusText: upstream.statusText,
+            headers,
+        });
+    }
+
+    const payload = await upstream.json();
+    if (!payload || !Array.isArray(payload.data)) {
+        return NextResponse.json(payload, { status: upstream.status, statusText: upstream.statusText, headers });
+    }
+
+    const data = await Promise.all(
+        payload.data.map(async (item: unknown) => {
+            if (!item || typeof item !== "object" || typeof (item as { url?: unknown }).url !== "string" || (item as { b64_json?: unknown }).b64_json) {
+                return item;
+            }
+            const url = (item as { url: string }).url;
+            const image = await fetch(url, { cache: "no-store" });
+            if (!image.ok) return item;
+            const buffer = Buffer.from(await image.arrayBuffer());
+            return { ...item, b64_json: buffer.toString("base64"), url: undefined };
+        }),
+    );
+
+    headers.set("content-type", "application/json");
+    return NextResponse.json({ ...payload, data }, { status: upstream.status, statusText: upstream.statusText, headers });
 }
