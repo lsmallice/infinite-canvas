@@ -18,7 +18,7 @@ const store = localforage.createInstance({ name: "infinite-canvas", storeName: "
 const objectUrls = new Map<string, string>();
 
 export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
-    const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
+    const blob = typeof input === "string" ? await imageSourceToBlob(input) : input;
     const storageKey = `image:${nanoid()}`;
     await store.setItem(storageKey, blob);
     const url = URL.createObjectURL(blob);
@@ -52,7 +52,7 @@ export async function setImageBlob(storageKey: string, blob: Blob) {
 export async function imageToDataUrl(image: { url?: string; dataUrl?: string; storageKey?: string }) {
     const url = image.dataUrl || (await resolveImageUrl(image.storageKey, image.url || ""));
     if (!url || url.startsWith("data:")) return url;
-    return blobToDataUrl(await (await fetch(url)).blob());
+    return blobToDataUrl(await imageSourceToBlob(url));
 }
 
 export async function deleteStoredImages(keys: Iterable<string>) {
@@ -89,4 +89,23 @@ function blobToDataUrl(blob: Blob) {
         reader.onerror = () => reject(new Error("读取图片失败"));
         reader.readAsDataURL(blob);
     });
+}
+
+async function imageSourceToBlob(source: string) {
+    if (source.startsWith("data:")) return dataUrlToBlob(source);
+    const response = await fetch(source);
+    if (!response.ok) throw new Error(`图片加载失败：${response.status}`);
+    return response.blob();
+}
+
+function dataUrlToBlob(dataUrl: string) {
+    const match = dataUrl.match(/^data:([^;,]+)?(;base64)?,(.*)$/);
+    if (!match) throw new Error("图片数据格式不正确");
+    const mimeType = match[1] || "image/png";
+    const raw = match[2] ? atob(match[3]) : decodeURIComponent(match[3]);
+    const bytes = new Uint8Array(raw.length);
+    for (let index = 0; index < raw.length; index += 1) {
+        bytes[index] = raw.charCodeAt(index);
+    }
+    return new Blob([bytes], { type: mimeType });
 }
